@@ -34,6 +34,9 @@
 #ifdef VELOX_ENABLE_S3
 #include "velox/connectors/hive/storage_adapters/s3fs/S3FileSystem.h"
 #endif
+#ifdef VELOX_ENABLE_ABFS
+#include "velox/connectors/hive/storage_adapters/abfs/AbfsFileSystem.h"
+#endif
 #include "velox/common/memory/MmapAllocator.h"
 #include "velox/dwio/dwrf/reader/DwrfReader.h"
 #include "velox/dwio/dwrf/writer/Writer.h"
@@ -67,33 +70,18 @@ void VeloxInitializer::Init(std::unordered_map<std::string, std::string> conf) {
       if (k == kVeloxCacheIOThreads)
         ioTHreads = std::stoi(v);
     }
-    std::string cachePath = cachePathPrefix + "/cache." + genUuid() + ".";
-    cacheExecutor_ = std::make_unique<folly::IOThreadPoolExecutor>(cacheShards);
-    ioExecutor_ = std::make_unique<folly::IOThreadPoolExecutor>(ioTHreads);
-    auto ssd = std::make_unique<velox::cache::SsdCache>(cachePath, cacheSize, cacheShards, cacheExecutor_.get());
-
-    std::error_code ec;
-    const std::filesystem::space_info si = std::filesystem::space(cachePathPrefix, ec);
-    if (si.available < cacheSize) {
-      VELOX_FAIL(
-          "not enough space for cache in " + cachePath + " cacha size: " + std::to_string(cacheSize) +
-          "free space: " + std::to_string(si.available));
-    }
 
     velox::memory::MmapAllocator::Options options;
     // TODO(yuan): should try to parse the offheap memory size here:
-    uint64_t memoryBytes = 200L << 30;
+    uint64_t memoryBytes = cacheSize;
     options.capacity = memoryBytes;
-
     auto allocator = std::make_shared<velox::memory::MmapAllocator>(options);
-    mappedMemory_ = std::make_shared<velox::cache::AsyncDataCache>(allocator, memoryBytes, std::move(ssd));
+    mappedMemory_ = std::make_shared<velox::cache::AsyncDataCache>(allocator, memoryBytes, nullptr);
 
     // register as default instance, will be used in parquet reader
     velox::memory::MemoryAllocator::setDefaultInstance(mappedMemory_.get());
     VELOX_CHECK_NOT_NULL(dynamic_cast<velox::cache::AsyncDataCache*>(mappedMemory_.get()));
-    LOG(INFO) << "STARTUP: Using AsyncDataCache"
-              << ", cache prefix: " << cachePath << ", cache size: " << cacheSize << ", cache shards: " << cacheShards
-              << ", cache IO threads: " << ioTHreads;
+    LOG(INFO) << "STARTUP: Using AsyncDataCache";
   }
 
   std::unordered_map<std::string, std::string> configurationValues;
@@ -163,6 +151,18 @@ void VeloxInitializer::Init(std::unordered_map<std::string, std::string> conf) {
   configurationValues.merge(S3Config);
 #endif
 
+#ifdef VELOX_ENABLE_ABFS
+  velox::filesystems::abfs::registerAbfsFileSystem();
+  std::unordered_map<std::string, std::string> ABFSConfig({});
+  for (auto& [k, v] : conf) {
+    if (k.find("fs.azure.account.key") == 0) {
+      ABFSConfig.insert({{k, v},});
+    } else if (k.find("spark.hadoop.fs.azure.account.key") == 0) {
+      ABFSConfig.insert({{k.substr(13), v},});
+    }
+  }
+
+  configurationValues.merge(ABFSConfig);
   auto properties = std::make_shared<const velox::core::MemConfig>(configurationValues);
   auto hiveConnector =
       velox::connector::getConnectorFactory(velox::connector::hive::HiveConnectorFactory::kHiveConnectorName)
@@ -339,9 +339,9 @@ std::shared_ptr<const velox::core::PlanNode> VeloxBackend::getVeloxPlanNode(cons
     }
   }
   auto planNode = subVeloxPlanConverter_->toVeloxPlan(splan);
-#ifdef GLUTEN_PRINT_DEBUG
-  std::cout << "Plan Node: " << std::endl << planNode->toString(true, true) << std::endl;
-#endif
+
+  // std::cout << "Plan Node: " << std::endl << planNode->toString(true, true) << std::endl;
+
   return planNode;
 }
 

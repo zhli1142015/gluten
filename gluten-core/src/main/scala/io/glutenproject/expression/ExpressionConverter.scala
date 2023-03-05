@@ -30,7 +30,7 @@ import org.apache.spark.sql.execution.exchange.BroadcastExchangeExec
 object ExpressionConverter extends Logging {
 
   def replaceWithExpressionTransformer(expr: Expression,
-      attributeSeq: Seq[Attribute]): ExpressionTransformer = {
+                                       attributeSeq: Seq[Attribute]): ExpressionTransformer = {
     // Check whether Gluten supports this expression
     val substraitExprName = ExpressionMappings.scalar_functions_map.getOrElse(expr.getClass,
       ExpressionMappings.getScalarSigOther(expr.prettyName))
@@ -39,7 +39,7 @@ object ExpressionConverter extends Logging {
     }
     // Check whether each backend supports this expression
     if (GlutenConfig.getSessionConf.enableAnsiMode ||
-        !BackendsApiManager.getValidatorApiInstance.doExprValidate(substraitExprName, expr)) {
+      !BackendsApiManager.getValidatorApiInstance.doExprValidate(substraitExprName, expr)) {
       throw new UnsupportedOperationException(s"Not supported: $expr.")
     }
     expr match {
@@ -249,7 +249,7 @@ object ExpressionConverter extends Logging {
             getStructField)
       case md5: Md5 =>
         Md5Transformer(substraitExprName,
-          replaceWithExpressionTransformer(md5.child, attributeSeq), md5) 
+          replaceWithExpressionTransformer(md5.child, attributeSeq), md5)
       case l: LeafExpression =>
         LeafExpressionTransformer(substraitExprName, l)
       case u: UnaryExpression =>
@@ -344,12 +344,14 @@ object ExpressionConverter extends Logging {
 
     def convertBroadcastExchangeToColumnar(exchange: BroadcastExchangeExec)
     : ColumnarBroadcastExchangeExec = {
+      println(exchange.child.nodeName)
       val newChild = exchange.child match {
         // get WholeStageTransformerExec directly
         case c2r: GlutenColumnarToRowExecBase => c2r.child
         // in case of fallbacking
         case codeGen: WholeStageCodegenExec =>
           if (codeGen.child.isInstanceOf[ColumnarToRowExec]) {
+            println("ColumnarToRowExec")
             val wholeStageTransformerExec = exchange.find(
               _.isInstanceOf[WholeStageTransformerExec])
             if (wholeStageTransformerExec.nonEmpty) {
@@ -358,6 +360,7 @@ object ExpressionConverter extends Logging {
               BackendsApiManager.getSparkPlanExecApiInstance.genRowToColumnarExec(codeGen)
             }
           } else {
+            println(codeGen.child.nodeName)
             BackendsApiManager.getSparkPlanExecApiInstance.genRowToColumnarExec(codeGen)
           }
       }
@@ -369,22 +372,22 @@ object ExpressionConverter extends Logging {
         dynamicPruning.transform {
           // Lookup inside subqueries for duplicate exchanges
           case in: InSubqueryExec => in.plan match {
-            case _: SubqueryBroadcastExec =>
+            case _: SubqueryBroadcastExec if GlutenConfig.getSessionConf.enableColumnarBroadcastExchange =>
               val newIn = in.plan.transform {
                 case exchange: BroadcastExchangeExec =>
                   convertBroadcastExchangeToColumnar(exchange)
               }.asInstanceOf[SubqueryBroadcastExec]
               val transformSubqueryBroadcast = ColumnarSubqueryBroadcastExec(
                 newIn.name, newIn.index, newIn.buildKeys, newIn.child)
-              in.copy(plan = transformSubqueryBroadcast.asInstanceOf[BaseSubqueryExec])
-            case _: ReusedSubqueryExec if in.plan.child.isInstanceOf[SubqueryBroadcastExec] =>
+              in.withNewPlan(plan = transformSubqueryBroadcast.asInstanceOf[BaseSubqueryExec])
+            case _: ReusedSubqueryExec if in.plan.child.isInstanceOf[SubqueryBroadcastExec] && GlutenConfig.getSessionConf.enableColumnarBroadcastExchange =>
               val newIn = in.plan.child.transform {
                 case exchange: BroadcastExchangeExec =>
                   convertBroadcastExchangeToColumnar(exchange)
               }.asInstanceOf[SubqueryBroadcastExec]
               val transformSubqueryBroadcast = ColumnarSubqueryBroadcastExec(
                 newIn.name, newIn.index, newIn.buildKeys, newIn.child)
-              in.copy(plan = ReusedSubqueryExec(transformSubqueryBroadcast))
+              in.withNewPlan(plan = ReusedSubqueryExec(transformSubqueryBroadcast))
             case _ => in
           }
         }

@@ -70,8 +70,9 @@ case class JoinSelectionOverrides(session: SparkSession) extends Strategy with
     } else {
       // non equal condition
       // Generate BHJ here, avoid to do match in `JoinSelection` again.
-      val isHintEmpty = hint.leftHint.isEmpty && hint.rightHint.isEmpty
-      val buildSide = getBroadcastBuildSide(left, right, joinType, hint, !isHintEmpty, conf)
+      val isHintEmpty = (hint.leftHint.isEmpty || hint.leftHint.get.strategy.isEmpty) && (hint.rightHint.isEmpty || hint.rightHint.get.strategy.isEmpty)
+      val buildSide = getBroadcastBuildSide(left, right, joinType, hint, false, conf)
+      logWarning(s"We should convert BHJ: ${buildSide.isDefined}, ${left.nodeName}: ${left.stats.sizeInBytes}, ${right.nodeName}: ${right.stats.sizeInBytes}, ${hint.leftHint} ${hint.rightHint}")
       if (buildSide.isDefined) {
         return Seq(
           joins.BroadcastHashJoinExec(
@@ -186,7 +187,10 @@ case class JoinSelectionOverrides(session: SparkSession) extends Strategy with
     plan match {
       // If the build side of BHJ is already decided by AQE, we need to keep the build side.
       case JoinSelectionShim.ExtractEquiJoinKeysShim(
-      joinType, leftKeys, rightKeys, condition, left, right, hint) =>
+      joinType, leftKeys, rightKeys, condition, left, right, hint)
+        if (GlutenConfig.getSessionConf.enableColumnarShuffledHashJoin ||
+          GlutenConfig.getSessionConf.enableColumnarSortMergeJoin ||
+          GlutenConfig.getSessionConf.enableColumnarBroadcastJoin)=>
         extractEqualJoinKeyCondition(
           joinType,
           leftKeys,

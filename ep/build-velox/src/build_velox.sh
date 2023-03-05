@@ -5,6 +5,7 @@ set -exu
 ENABLE_S3=OFF
 #Set on run gluten on HDFS
 ENABLE_HDFS=OFF
+ENABLE_ABFS=OFF
 #It can be set to OFF when compiling velox again
 BUILD_PROTOBUF=ON
 BUILD_TYPE=release
@@ -29,6 +30,10 @@ do
         ;;
         --enable_hdfs=*)
         ENABLE_HDFS=("${arg#*=}")
+        shift # Remove argument name from processing
+        ;;
+        --enable_abfs=*)
+        ENABLE_ABFS=("${arg#*=}")
         shift # Remove argument name from processing
         ;;
         --build_protobuf=*)
@@ -72,7 +77,7 @@ function process_setup_ubuntu {
         sed -i '/^  run_and_time install_fmt/a \ \ run_and_time install_awssdk' scripts/setup-ubuntu.sh
       fi
       sed -i 's/run_and_time install_conda/#run_and_time install_conda/' scripts/setup-ubuntu.sh
-      
+
 }
 
 function process_setup_centos8 {
@@ -112,6 +117,7 @@ echo "CMAKE Arguments:"
 echo "VELOX_HOME=${VELOX_HOME}"
 echo "ENABLE_S3=${ENABLE_S3}"
 echo "ENABLE_HDFS=${ENABLE_HDFS}"
+echo "ENABLE_ABFS=${ENABLE_ABFS}"
 echo "BUILD_PROTOBUF=${BUILD_PROTOBUF}"
 echo "BUILD_TYPE=${BUILD_TYPE}"
 
@@ -143,6 +149,9 @@ function compile {
     fi
     if [ $ENABLE_S3 == "ON" ]; then
       COMPILE_OPTION="$COMPILE_OPTION -DVELOX_ENABLE_S3=ON"
+    fi
+    if [ $ENABLE_ABFS == "ON" ]; then
+      COMPILE_OPTION="$COMPILE_OPTION -DVELOX_ENABLE_ABFS=ON"
     fi
     COMPILE_OPTION="$COMPILE_OPTION -DCMAKE_BUILD_TYPE=${BUILD_TYPE}"
     COMPILE_TYPE=$(if [[ "$BUILD_TYPE" == "debug" ]] || [[ "$BUILD_TYPE" == "Debug" ]]; then echo 'debug'; else echo 'release'; fi)

@@ -27,9 +27,9 @@ import java.util
 import java.util.{Locale, TimeZone}
 
 case class GlutenNumaBindingInfo(
-    enableNumaBinding: Boolean,
-    totalCoreRange: Array[String] = null,
-    numCoresPerExecutor: Int = -1) {}
+                                  enableNumaBinding: Boolean,
+                                  totalCoreRange: Array[String] = null,
+                                  numCoresPerExecutor: Int = -1) {}
 
 class GlutenConfig(conf: SQLConf) extends Logging {
 
@@ -270,6 +270,10 @@ object GlutenConfig {
   val S3_USE_INSTANCE_CREDENTIALS = "fs.s3a.use.instance.credentials"
   val SPARK_S3_USE_INSTANCE_CREDENTIALS: String = HADOOP_PREFIX + S3_USE_INSTANCE_CREDENTIALS
 
+  // ABFS config
+  val ABFS_ACCOUNT_KEY = "hadoop.fs.azure.account.key"
+  val SPARK_ABFS_ACCOUNT_KEY: String = "spark." + ABFS_ACCOUNT_KEY
+
   // QAT config
   val GLUTEN_ENABLE_QAT = "spark.gluten.sql.columnar.qat"
   val GLUTEN_QAT_CODEC_PREFIX = "gluten_qat_"
@@ -379,6 +383,9 @@ object GlutenConfig {
       (SPARK_S3_USE_INSTANCE_CREDENTIALS, "false")
     )
     keyWithDefault.forEach(e => nativeConfMap.put(e._1, conf.get(e._1, e._2)))
+    conf.getAll
+      .filter(_._1.startsWith(SPARK_ABFS_ACCOUNT_KEY))
+      .foreach(entry => nativeConfMap.put(entry._1, entry._2))
     // velox cache and HiveConnector config
     conf.getAll
       .filter(_._1.startsWith(backendPrefix))

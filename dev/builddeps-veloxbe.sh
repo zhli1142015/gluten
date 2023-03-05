@@ -17,6 +17,7 @@ ENABLE_QAT=OFF
 ENABLE_HBM=OFF
 ENABLE_S3=OFF
 ENABLE_HDFS=OFF
+ENABLE_ABFS=OFF
 ENABLE_EP_CACHE=OFF
 for arg in "$@"
 do
@@ -57,6 +58,10 @@ do
         ENABLE_HDFS=("${arg#*=}")
         shift # Remove argument name from processing
         ;;
+        --enable_abfs=*)
+        ENABLE_ABFS=("${arg#*=}")
+        shift # Remove argument name from processing
+        ;;
         --enable_ep_cache=*)
         ENABLE_EP_CACHE=("${arg#*=}")
         shift # Remove argument name from processing
@@ -83,7 +88,7 @@ cd $GLUTEN_DIR/ep/build-velox/src
 
 if [ $ENABLE_EP_CACHE == 'OFF' ] || [ ! -f $GLUTEN_DIR/ep/build-velox/build/velox-commit.cache ]; then
   ./build_velox.sh --build_protobuf=$BUILD_PROTOBUF --enable_s3=$ENABLE_S3 \
-                 --build_type=$BUILD_TYPE --enable_hdfs=$ENABLE_HDFS  --build_type=$BUILD_TYPE \
+                 --build_type=$BUILD_TYPE --enable_hdfs=$ENABLE_HDFS --enable_abfs=$ENABLE_ABFS  --build_type=$BUILD_TYPE \
                  --enable_ep_cache=$ENABLE_EP_CACHE
 fi
 
@@ -94,7 +99,7 @@ mkdir build
 cd build
 cmake -DBUILD_VELOX_BACKEND=ON -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
       -DBUILD_TESTS=$BUILD_TESTS -DBUILD_BENCHMARKS=$BUILD_BENCHMARKS -DBUILD_JEMALLOC=$BUILD_JEMALLOC \
-      -DENABLE_HBM=$ENABLE_HBM -DENABLE_QAT=$ENABLE_QAT -DVELOX_ENABLE_S3=$ENABLE_S3 -DVELOX_ENABLE_HDFS=$ENABLE_HDFS ..
+      -DENABLE_HBM=$ENABLE_HBM -DENABLE_QAT=$ENABLE_QAT -DVELOX_ENABLE_S3=$ENABLE_S3 -DVELOX_ENABLE_HDFS=$ENABLE_HDFS -DVELOX_ENABLE_ABFS=$ENABLE_ABFS ..
 make -j
 
 

@@ -319,14 +319,14 @@ case class AddTransformHintRule() extends Rule[SparkPlan] {
           //   and need some tests before being enabled.
           TransformHints.tagNotTransformable(plan)
         case plan: ProjectExec =>
-          if (!enableColumnarProject) {
+          if (!enableColumnarProject/* && !((plan.child.isInstanceOf[FilterExec] && plan.child.asInstanceOf[FilterExec].child.isInstanceOf[FileSourceScanExec]) || plan.child.isInstanceOf[FileSourceScanExec])*/) {
             TransformHints.tagNotTransformable(plan)
           } else {
             val transformer = ProjectExecTransformer(plan.projectList, plan.child)
             TransformHints.tag(plan, transformer.doValidate().toTransformHint)
           }
         case plan: FilterExec =>
-          if (!enableColumnarFilter) {
+          if (!enableColumnarFilter && !(plan.child.isInstanceOf[FileSourceScanExec] || plan.child.isInstanceOf[BatchScanExec])) {
             TransformHints.tagNotTransformable(plan)
           } else {
             val transformer = BackendsApiManager.getSparkPlanExecApiInstance
