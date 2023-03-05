@@ -161,7 +161,7 @@ void VeloxInitializer::Init(std::unordered_map<std::string, std::string> conf) {
       ABFSConfig.insert({{k.substr(13), v},});
     }
   }
-
+#endif
   configurationValues.merge(ABFSConfig);
   auto properties = std::make_shared<const velox::core::MemConfig>(configurationValues);
   auto hiveConnector =
