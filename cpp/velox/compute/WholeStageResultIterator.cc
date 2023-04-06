@@ -250,6 +250,13 @@ void WholeStageResultIterator::setConfToQueryContext(const std::shared_ptr<velox
     std::string errDetails = err.what();
     throw std::runtime_error("Invalid conf arg: " + errDetails);
   }
+  // pass spark conf
+  for (auto& [k, v] : confMap_) {
+    if (k.find("velox.queryconf.") == 0){
+      configs.insert({{k.substr(16), v},});
+      std::cout << "insert " << k.substr(16) << " " << v << std::endl; 
+    }
+  }
   queryCtx->setConfigOverridesUnsafe(std::move(configs));
 }
 

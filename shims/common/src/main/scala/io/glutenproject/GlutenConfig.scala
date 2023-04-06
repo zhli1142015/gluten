@@ -297,6 +297,8 @@ object GlutenConfig {
   // unit: SECONDS, default 1 day
   val GLUTEN_RESOURCE_RELATION_EXPIRED_TIME_DEFAULT: Int = 86400
 
+  val GLUTEN_VELOX_QUERY_CONF_PREFIX = s"$GLUTEN_VELOX_BACKEND.queryconf."
+
   var ins: GlutenConfig = _
 
   def getConf: GlutenConfig = {
@@ -339,7 +341,18 @@ object GlutenConfig {
     conf
       .filter(_._1.startsWith(backendPrefix))
       .foreach(entry => nativeConfMap.put(entry._1, entry._2))
-
+    // this is used to map spark conf to velox query conf.
+    val queryConfKeys = ImmutableList.of(
+      (SQLConf.RUNTIME_BLOOM_FILTER_MAX_NUM_ITEMS.key, "bloomFilter.max_num_items"),
+      (SQLConf.RUNTIME_BLOOM_FILTER_MAX_NUM_BITS.key, "bloomFilter.max_num_bits"),
+      (SQLConf.RUNTIME_BLOOM_FILTER_EXPECTED_NUM_ITEMS.key, "bloomFilter.expected_num_items")
+    )
+    queryConfKeys.forEach(
+      e => {
+        if (conf.contains(e._1)) {
+          nativeConfMap.put(GLUTEN_VELOX_QUERY_CONF_PREFIX + e._2, conf(e._1))
+        }
+      })
     // return
     nativeConfMap
   }
