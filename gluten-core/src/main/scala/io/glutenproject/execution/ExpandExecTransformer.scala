@@ -37,7 +37,7 @@ import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.plans.physical.{Partitioning, UnknownPartitioning}
 import org.apache.spark.sql.execution._
 import org.apache.spark.sql.internal.SQLConf
-import org.apache.spark.sql.types.DataTypes
+import org.apache.spark.sql.types.{DataTypes, IntegerType}
 import org.apache.spark.sql.vectorized.ColumnarBatch
 
 import java.util
@@ -90,15 +90,56 @@ case class ExpandExecTransformer(projections: Seq[Seq[Expression]],
                  input: RelNode,
                  validation: Boolean): RelNode = {
     val args = context.registeredFunction
-    val groupSize = groupExpression.size
-    val aggSize = projections.head.size - groupSize
+    // There are three cases we need to handle:
+    // 1. agg exprs + group by exprs + gid.
+    // 2. agg exprs + group by exprs + gid + _gen_grouping_pos.
+    //  --> The last column is for handling duplicate grouping sets.
+    // 3. group by exprs + gid + agg exprs.
+    //  --> gid is calculated by different way from above two cases.
+    val colGroupIdIndex = projections.head
+      .indexWhere(p => p.isInstanceOf[Literal] && p.asInstanceOf[Literal].value != null)
+    val hasDuplicateGroupingSets = colGroupIdIndex == projections.head.size - 2 &&
+      groupExpression.last.name == "_gen_grouping_pos"
+    println(s"projections: ${projections}")
+    println(s"groupExpression: ${groupExpression}")
+    println(s"originalInputAttributes: ${originalInputAttributes}")
+    println(s"output: ${output}")
+    val extraGroupCols = if (hasDuplicateGroupingSets) 2 else 1
+    println(s"extraGroupCols: ${extraGroupCols}")
+    val groupSize = groupExpression.size - extraGroupCols
+    println(s"groupSize: ${groupSize}")
+    val aggSize = projections.head.size - groupExpression.size
+    println(s"aggSize: ${aggSize}")
+
+    val groupExprStartIndex = if (colGroupIdIndex != projections.head.size -1 &&
+      !hasDuplicateGroupingSets) {
+      0
+    } else {
+      aggSize
+    }
+    println(s"groupExprStartIndex: ${groupExprStartIndex}")
+
+    val aggExprStartIndex = if (colGroupIdIndex != projections.head.size -1 &&
+      !hasDuplicateGroupingSets) {
+      colGroupIdIndex + 1
+    } else {
+      0
+    }
+    println(s"aggExprStartIndex: ${aggExprStartIndex}")
 
     val groupsetExprNodes = new util.ArrayList[util.ArrayList[ExpressionNode]]()
     val aggExprNodes = new util.ArrayList[ExpressionNode]()
-    for (i <- 0 until aggSize) {
-      val aggExprNode = ExpressionConverter
+    for (i <- aggExprStartIndex until aggExprStartIndex + aggSize) {
+      var expr: Option[Expression] = None
+      for (j <- 0 until projections.size) {
+        if (expr.isEmpty && !(projections(j).apply(i).isInstanceOf[Literal] &&
+          projections(j).apply(i).asInstanceOf[Literal].value == null)) {
+          expr = Some(projections(j).apply(i))
+        }
+      }
+      var aggExprNode = ExpressionConverter
         .replaceWithExpressionTransformer(
-          projections.head(i),
+          expr.get,
           originalInputAttributes)
         .doTransform(args)
       aggExprNodes.add(aggExprNode)
@@ -106,7 +147,8 @@ case class ExpandExecTransformer(projections: Seq[Seq[Expression]],
 
     projections.foreach { projection =>
       val groupExprNodes = new util.ArrayList[ExpressionNode]()
-      for (i <- aggSize until (projection.size - 1)) {
+      // TODO: here we need add flag
+      for (i <- groupExprStartIndex until groupExprStartIndex + groupSize + extraGroupCols) {
         if (!(projection(i).isInstanceOf[Literal] &&
           projection(i).asInstanceOf[Literal].value == null)) {
           var groupExprNode = ExpressionConverter
@@ -167,34 +209,65 @@ case class ExpandExecTransformer(projections: Seq[Seq[Expression]],
         "spark_grouping_id", groupsetExprNodes, aggExprNodes,
         extensionNode, context, operatorId)
     }
+    println("validated for expand")
 
     if (BackendsApiManager.getSettings.needProjectExpandOutput) {
       // After ExpandRel in velox, the output is
       // grouping cols + agg cols + groupingID col,
       // here we need to add ProjectRel to
-      // convert the ouput to agg cols + grouping cols + groupingID col order.
+      // convert the ouput to the correct order.
       val selectNodes = new java.util.ArrayList[ExpressionNode]()
-      // Add agg cols index
-      for (i <- (groupSize -1) until (aggSize + groupSize - 1) ) {
-        selectNodes.add(ExpressionBuilder.makeSelection(i))
-      }
-      // Add grouping cols index
-      for (i <- 0 until (groupSize - 1)) {
-        selectNodes.add(ExpressionBuilder.makeSelection(i))
+      def AddGroupIdCol(
+        selectNodes: java.util.ArrayList[ExpressionNode],
+        gidIndex: Int,
+        isIntegerType: Boolean = false): Unit = {
+        if (SQLConf.get.integerGroupingIdEnabled || isIntegerType) {
+          // When 'integerGroupingIdEnabled' set, groupID is integer type but velox always
+          // gerenate long type value. Convert result to fix test case 'SPARK-30279 Support 32 or
+          // more grouping attributes for GROUPING_ID()'.
+          val typeNode = ConverterUtils.getTypeNode(DataTypes.IntegerType, false)
+          selectNodes.add(
+            ExpressionBuilder.makeCast(
+              typeNode,
+              ExpressionBuilder.makeSelection(gidIndex),
+              SQLConf.get.ansiEnabled))
+        } else {
+          selectNodes.add(ExpressionBuilder.makeSelection(gidIndex))
+        }
       }
 
-      // Add groupID col index
-      if (SQLConf.get.integerGroupingIdEnabled) {
-        // When 'integerGroupingIdEnabled' set, groupID is integer type but velox always gerenate long type value.
-        // Convert result to fix test case 'SPARK-30279 Support 32 or more grouping attributes for GROUPING_ID()'.
-        val typeNode = ConverterUtils.getTypeNode(DataTypes.IntegerType, false)
-        selectNodes.add(ExpressionBuilder.makeCast(typeNode, ExpressionBuilder.makeSelection(projections(0).size - 1), SQLConf.get.ansiEnabled))
+      if (groupExprStartIndex < aggExprStartIndex) {
+        // Add grouping cols index
+        for (i <- 0 until groupSize) {
+          println(i)
+          selectNodes.add(ExpressionBuilder.makeSelection(i))
+        }
+        // Add groupID col index
+        println(projections(0).size - 1)
+        AddGroupIdCol(selectNodes, projections(0).size - 1, isIntegerType = true)
+        // Add agg cols index
+        for (i <- 0 until aggSize) {
+          println(i + groupSize)
+          selectNodes.add(ExpressionBuilder.makeSelection(i + groupSize))
+        }
       } else {
-        selectNodes.add(ExpressionBuilder.makeSelection(projections(0).size - 1))
+        // Add agg cols index
+        for (i <- 0 until aggSize) {
+          selectNodes.add(ExpressionBuilder.makeSelection(i + groupSize))
+        }
+        // Add grouping cols index
+        for (i <- 0 until groupSize) {
+          selectNodes.add(ExpressionBuilder.makeSelection(i))
+        }
+        // Add groupID col index
+        AddGroupIdCol(selectNodes, projections(0).size - 1)
+        if (hasDuplicateGroupingSets) {
+          selectNodes.add(
+            ExpressionBuilder.makeSelection(projections(0).size - extraGroupCols))
+        }
       }
-
       // Pass the reordered index agg + groupingsets + GID
-      val emitStartIndex = originalInputAttributes.size + 1
+      val emitStartIndex = projections.head.size
       if (!validation) {
         RelBuilder.makeProjectRel(expandRel, selectNodes, context, operatorId, emitStartIndex)
       } else {
@@ -228,7 +301,7 @@ case class ExpandExecTransformer(projections: Seq[Seq[Expression]],
     // be also other cases which we don't meet.
     if (child.output.size + 1 != projections.head.size) {
       logWarning(s"Not a supported expand node for grouping sets.")
-      return false
+      //return false
     }
 
     val substraitContext = new SubstraitContext
