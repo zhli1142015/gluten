@@ -65,7 +65,7 @@ bool validateColNames(const ::substrait::NamedStruct& schema) {
   };
 
   for (const auto& name : schema.names()) {
-    common::Tokenizer token(name, common::Separators::get());
+    auto token = common::Tokenizer::getInstance(name);
     for (auto i = 0; i < name.size(); i++) {
       auto c = name[i];
       if (!isUnquotedPathCharacter(c)) {

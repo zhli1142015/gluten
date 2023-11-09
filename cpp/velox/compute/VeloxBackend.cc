@@ -35,6 +35,7 @@
 #include "udf/UdfLoader.h"
 #include "utils/ConfigExtractor.h"
 #include "utils/exception.h"
+#include "utils/SparkTokenizer.h"
 #include "velox/common/caching/SsdCache.h"
 #include "velox/common/file/FileSystems.h"
 #include "velox/common/memory/MmapAllocator.h"
@@ -181,6 +182,10 @@ void VeloxBackend::init(const std::unordered_map<std::string, std::string>& conf
   // Setup and register.
   velox::filesystems::registerLocalFileSystem();
   initJolFilesystem(conf);
+
+  velox::common::Tokenizer::registerInstanceFactory([](std::string p) {
+    return std::make_unique<SparkTokenizer>(p);
+  });
 
   std::unordered_map<std::string, std::string> configurationValues;
 

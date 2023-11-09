@@ -278,6 +278,7 @@ set(VELOX_SRCS
     utils/VeloxArrowUtils.cc
     utils/ConfigExtractor.cc
     utils/Common.cc
+    utils/SparkTokenizer.cc
     )
 
 if(BUILD_TESTS OR BUILD_BENCHMARKS)
