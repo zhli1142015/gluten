@@ -33,5 +33,6 @@ trait BaseDataSource {
   /** Returns the input file paths, used to validate the partition column path */
   def getInputFilePathsInternal: Seq[String]
 
+  /** Returns the root paths of partitions, used to validate if the path scheme is supported. */
   def getRootPathsInternal: Seq[String]
 }
