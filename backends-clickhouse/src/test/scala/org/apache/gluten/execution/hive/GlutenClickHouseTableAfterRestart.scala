@@ -16,8 +16,8 @@
  */
 package org.apache.gluten.execution.hive
 
-import org.apache.gluten.GlutenConfig
 import org.apache.gluten.backendsapi.clickhouse.{CHConf, RuntimeConfig, RuntimeSettings}
+import org.apache.gluten.config.GlutenConfig
 import org.apache.gluten.execution.GlutenClickHouseTPCHAbstractSuite
 
 import org.apache.spark.SparkConf
@@ -79,11 +79,11 @@ class GlutenClickHouseTableAfterRestart
 
   test("test mergetree after restart") {
     spark.sql(s"""
-                 |DROP TABLE IF EXISTS lineitem_mergetree;
+                 |DROP TABLE IF EXISTS LINEITEM_MERGETREE;
                  |""".stripMargin)
 
     spark.sql(s"""
-                 |CREATE TABLE IF NOT EXISTS lineitem_mergetree
+                 |CREATE TABLE IF NOT EXISTS LINEITEM_MERGETREE
                  |(
                  | l_orderkey      bigint,
                  | l_partkey       bigint,

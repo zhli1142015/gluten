@@ -43,7 +43,6 @@
 #include <Storages/SubstraitSource/ReadBufferBuilder.h>
 #include <Storages/SubstraitSource/SubstraitFileSource.h>
 #include <boost/compute/detail/lru_cache.hpp>
-#include <hdfs/hdfs.h>
 #include <sys/stat.h>
 #include <Poco/Logger.h>
 #include <Poco/URI.h>
@@ -64,6 +63,9 @@
 #include <aws/s3/model/ListObjectsV2Request.h>
 #endif
 
+#if USE_HDFS
+#include <hdfs/hdfs.h>
+#endif
 
 namespace DB
 {
@@ -75,6 +77,7 @@ extern const SettingsUInt64 s3_retry_attempts;
 extern const SettingsMaxThreads max_download_threads;
 extern const SettingsUInt64 max_download_buffer_size;
 extern const SettingsBool input_format_allow_seeks;
+extern const SettingsUInt64 max_read_buffer_size;
 }
 namespace ErrorCodes
 {
@@ -204,12 +207,15 @@ adjustReadRangeIfNeeded(std::unique_ptr<SeekableReadBuffer> read_buffer, const s
         file_info.start() + file_info.length(),
         start_end.first,
         start_end.second);
-
+#if USE_HDFS
     /// If read buffer doesn't support right bounded reads, wrap it with BoundedReadBuffer to enable right bounded reads.
     if (dynamic_cast<DB::ReadBufferFromHDFS *>(read_buffer.get()) || dynamic_cast<DB::AsynchronousReadBufferFromHDFS *>(read_buffer.get())
         || dynamic_cast<DB::ReadBufferFromFile *>(read_buffer.get()))
         read_buffer = std::make_unique<DB::BoundedReadBuffer>(std::move(read_buffer));
-
+#else 
+    if (dynamic_cast<DB::ReadBufferFromFile *>(read_buffer.get()))
+        read_buffer = std::make_unique<DB::BoundedReadBuffer>(std::move(read_buffer));
+#endif
     read_buffer->seek(start_end.first, SEEK_SET);
     read_buffer->setReadUntilPosition(start_end.second);
     return std::move(read_buffer);
@@ -218,7 +224,7 @@ adjustReadRangeIfNeeded(std::unique_ptr<SeekableReadBuffer> read_buffer, const s
 class LocalFileReadBufferBuilder : public ReadBufferBuilder
 {
 public:
-    explicit LocalFileReadBufferBuilder(DB::ContextPtr context_) : ReadBufferBuilder(context_) { }
+    explicit LocalFileReadBufferBuilder(const DB::ContextPtr & context_) : ReadBufferBuilder(context_) { }
     ~LocalFileReadBufferBuilder() override = default;
 
     bool isRemote() const override { return false; }
@@ -691,7 +697,7 @@ ReadBufferBuilder::ReadBufferBuilder(const DB::ContextPtr & context_) : context(
 }
 
 std::unique_ptr<DB::ReadBuffer>
-ReadBufferBuilder::wrapWithBzip2(std::unique_ptr<DB::ReadBuffer> in, const substrait::ReadRel::LocalFiles::FileOrFiles & file_info)
+ReadBufferBuilder::wrapWithBzip2(std::unique_ptr<DB::ReadBuffer> in, const substrait::ReadRel::LocalFiles::FileOrFiles & file_info) const
 {
     /// Bzip2 compressed file is splittable and we need to adjust read range for each split
     auto * seekable = dynamic_cast<SeekableReadBuffer *>(in.release());
@@ -743,18 +749,25 @@ ReadBufferBuilder::wrapWithBzip2(std::unique_ptr<DB::ReadBuffer> in, const subst
         new_end);
 
     std::unique_ptr<SeekableReadBuffer> bounded_in;
+#if USE_HDFS
     if (dynamic_cast<DB::ReadBufferFromHDFS *>(seekable_in.get()) || dynamic_cast<DB::AsynchronousReadBufferFromHDFS *>(seekable_in.get())
         || dynamic_cast<DB::ReadBufferFromFile *>(seekable_in.get()))
         bounded_in = std::make_unique<BoundedReadBuffer>(std::move(seekable_in));
     else
         bounded_in = std::move(seekable_in);
-
+#else
+    if (dynamic_cast<DB::ReadBufferFromFile *>(seekable_in.get()))
+        bounded_in = std::make_unique<BoundedReadBuffer>(std::move(seekable_in));
+    else
+        bounded_in = std::move(seekable_in);
+#endif
     bounded_in->seek(new_start, SEEK_SET);
     bounded_in->setReadUntilPosition(new_end);
     bool first_block_need_special_process = (new_start > 0);
     bool last_block_need_special_process = (new_end < file_size);
+    size_t buffer_size = context->getSettingsRef()[DB::Setting::max_read_buffer_size];
     auto decompressed_in = std::make_unique<SplittableBzip2ReadBuffer>(
-        std::move(bounded_in), first_block_need_special_process, last_block_need_special_process);
+        std::move(bounded_in), first_block_need_special_process, last_block_need_special_process, buffer_size);
     return std::move(decompressed_in);
 }
 

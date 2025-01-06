@@ -16,7 +16,6 @@
  */
 package org.apache.spark.shuffle
 
-import org.apache.gluten.GlutenConfig
 import org.apache.gluten.backendsapi.BackendsApiManager
 import org.apache.gluten.columnarbatch.ColumnarBatches
 import org.apache.gluten.memory.memtarget.{MemoryTarget, Spiller, Spillers}
@@ -33,6 +32,7 @@ import org.apache.spark.util.SparkResourceUtil
 
 import org.apache.celeborn.client.ShuffleClient
 import org.apache.celeborn.common.CelebornConf
+import org.apache.gluten.config.GlutenConfig
 
 import java.io.IOException
 
@@ -127,7 +127,7 @@ class VeloxCelebornColumnarShuffleWriter[K, V](
       compressionLevel,
       compressionBufferSize,
       bufferCompressThreshold,
-      GlutenConfig.getConf.columnarShuffleCompressionMode,
+      GlutenConfig.get.columnarShuffleCompressionMode,
       conf.get(SHUFFLE_SORT_INIT_BUFFER_SIZE).toInt,
       conf.get(SHUFFLE_SORT_USE_RADIXSORT),
       clientPushBufferMaxSize,
@@ -138,7 +138,7 @@ class VeloxCelebornColumnarShuffleWriter[K, V](
       GlutenShuffleUtils.getStartPartitionId(dep.nativePartitioning, context.partitionId),
       "celeborn",
       shuffleWriterType,
-      GlutenConfig.getConf.columnarShuffleReallocThreshold
+      GlutenConfig.get.columnarShuffleReallocThreshold
     )
     runtime
       .memoryManager()

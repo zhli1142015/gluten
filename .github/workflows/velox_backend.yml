@@ -544,7 +544,7 @@ jobs:
       fail-fast: false
       matrix:
         spark: [ "spark-3.2" ]
-        celeborn: [ "celeborn-0.5.2", "celeborn-0.4.2", "celeborn-0.3.2-incubating" ]
+        celeborn: [ "celeborn-0.5.2", "celeborn-0.4.3", "celeborn-0.3.2-incubating" ]
     runs-on: ubuntu-20.04
     container: apache/gluten:centos-8
     steps:
@@ -566,12 +566,16 @@ jobs:
       - name: TPC-H SF1.0 && TPC-DS SF1.0 Parquet local spark3.2 with ${{ matrix.celeborn }}
         run: |
           EXTRA_PROFILE=""
-          if [ "${{ matrix.celeborn }}" = "celeborn-0.4.2" ]; then
+          if [ "${{ matrix.celeborn }}" = "celeborn-0.4.3" ]; then
             EXTRA_PROFILE="-Pceleborn-0.4"
           elif [ "${{ matrix.celeborn }}" = "celeborn-0.5.2" ]; then
             EXTRA_PROFILE="-Pceleborn-0.5"
           fi
           echo "EXTRA_PROFILE: ${EXTRA_PROFILE}"
+          if [ ! -e "/opt/apache-${{ matrix.celeborn }}-bin.tgz" ]; then
+            echo "WARNING: please pre-install your required package in docker image since the downloading is throttled by this site."
+            wget -nv https://archive.apache.org/dist/celeborn/${{ matrix.celeborn }}/apache-${{ matrix.celeborn }}-bin.tgz -P /opt/
+          fi
           cd /opt && mkdir -p celeborn && \
           tar xzf apache-${{ matrix.celeborn }}-bin.tgz -C /opt/celeborn --strip-components=1 && cd celeborn && \
           mv ./conf/celeborn-env.sh.template ./conf/celeborn-env.sh && \
@@ -971,6 +975,70 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-report-spark35-slow-ras
+          path: '**/surefire-reports/TEST-*.xml'
+
+  run-spark-test-spark35-smj:
+    needs: build-native-lib-centos-7
+    runs-on: ubuntu-20.04
+    container: apache/gluten:centos-8
+    steps:
+      - uses: actions/checkout@v2
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: velox-native-lib-centos-7-${{github.sha}}
+          path: ./cpp/build/releases
+      - name: Download Arrow Jars
+        uses: actions/download-artifact@v3
+        with:
+          name: arrow-jars-centos-7-${{github.sha}}
+          path: /root/.m2/repository/org/apache/arrow/
+      - name: Prepare
+        run: |
+          dnf module -y install python39 && \
+          alternatives --set python3 /usr/bin/python3.9 && \
+          pip3 install setuptools && \
+          pip3 install pyspark==3.5.2 cython && \
+          pip3 install pandas pyarrow
+      - name: Build and Run unit test for Spark 3.5.2 (other tests)
+        run: |
+          cd $GITHUB_WORKSPACE/
+          export SPARK_SCALA_VERSION=2.12
+          $MVN_CMD clean test -Pspark-3.5 -Pbackends-velox -Pceleborn -Piceberg -Pdelta -Pspark-ut \
+          -DargLine="-Dspark.test.home=/opt/shims/spark35/spark_home/ -Dspark.gluten.sql.columnar.forceShuffledHashJoin=false" \
+          -DtagsToExclude=org.apache.spark.tags.ExtendedSQLTest,org.apache.gluten.tags.UDFTest,org.apache.gluten.tags.SkipTestTags
+      - name: Upload test report
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-spark35-smj
+          path: '**/surefire-reports/TEST-*.xml'
+
+  run-spark-test-spark35-slow-smj:
+    needs: build-native-lib-centos-7
+    runs-on: ubuntu-20.04
+    container: apache/gluten:centos-8
+    steps:
+      - uses: actions/checkout@v2
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: velox-native-lib-centos-7-${{github.sha}}
+          path: ./cpp/build/releases
+      - name: Download Arrow Jars
+        uses: actions/download-artifact@v3
+        with:
+          name: arrow-jars-centos-7-${{github.sha}}
+          path: /root/.m2/repository/org/apache/arrow/
+      - name: Build and Run unit test for Spark 3.5.2 (slow tests)
+        run: |
+          cd $GITHUB_WORKSPACE/
+          $MVN_CMD clean test -Pspark-3.5 -Pbackends-velox -Pceleborn -Piceberg -Pdelta -Pspark-ut \
+          -DargLine="-Dspark.test.home=/opt/shims/spark35/spark_home/ -Dspark.gluten.sql.columnar.forceShuffledHashJoin=false" \
+          -DtagsToInclude=org.apache.spark.tags.ExtendedSQLTest
+      - name: Upload test report
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-spark35-slow-smj
           path: '**/surefire-reports/TEST-*.xml'
 
   run-cpp-test-udf-test:

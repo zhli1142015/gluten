@@ -299,8 +299,8 @@ bool SubstraitToVeloxPlanValidator::validateCast(
       LOG_VALIDATION_MSG("Invalid input type in casting: ARRAY/MAP/ROW/VARBINARY.");
       return false;
     case TypeKind::TIMESTAMP:
-      // Only support cast timestamp to date
-      if (!toType->isDate()) {
+      // Only support casting timestamp to date or varchar.
+      if (!toType->isDate() && toType->kind() != TypeKind::VARCHAR) {
         LOG_VALIDATION_MSG(
             "Casting from TIMESTAMP to " + toType->toString() + " is not supported or has incorrect result.");
         return false;
@@ -979,6 +979,7 @@ bool SubstraitToVeloxPlanValidator::validate(const ::substrait::JoinRel& joinRel
       SubstraitParser::configSetInOptimization(joinRel.advanced_extension(), "isSMJ=")) {
     switch (joinRel.type()) {
       case ::substrait::JoinRel_JoinType_JOIN_TYPE_INNER:
+      case ::substrait::JoinRel_JoinType_JOIN_TYPE_OUTER:
       case ::substrait::JoinRel_JoinType_JOIN_TYPE_LEFT:
       case ::substrait::JoinRel_JoinType_JOIN_TYPE_RIGHT:
       case ::substrait::JoinRel_JoinType_JOIN_TYPE_LEFT_SEMI:

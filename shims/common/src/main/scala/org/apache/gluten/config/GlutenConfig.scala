@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.gluten
+package org.apache.gluten.config
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.network.util.{ByteUnit, JavaUtils}
@@ -129,18 +129,25 @@ class GlutenConfig(conf: SQLConf) extends Logging {
   def scanFileSchemeValidationEnabled: Boolean =
     conf.getConf(VELOX_SCAN_FILE_SCHEME_VALIDATION_ENABLED)
 
-  // whether to use ColumnarShuffleManager
+  // Whether to use GlutenShuffleManager (experimental).
+  def isUseGlutenShuffleManager: Boolean =
+    conf
+      .getConfString("spark.shuffle.manager", "sort")
+      .equals("org.apache.spark.shuffle.GlutenShuffleManager")
+
+  // Whether to use ColumnarShuffleManager.
   def isUseColumnarShuffleManager: Boolean =
     conf
       .getConfString("spark.shuffle.manager", "sort")
       .equals("org.apache.spark.shuffle.sort.ColumnarShuffleManager")
 
-  // whether to use CelebornShuffleManager
+  // Whether to use CelebornShuffleManager.
   def isUseCelebornShuffleManager: Boolean =
     conf
       .getConfString("spark.shuffle.manager", "sort")
       .contains("celeborn")
 
+  // Whether to use UniffleShuffleManager.
   def isUseUniffleShuffleManager: Boolean =
     conf
       .getConfString("spark.shuffle.manager", "sort")
@@ -483,6 +490,9 @@ class GlutenConfig(conf: SQLConf) extends Logging {
   def enableCelebornFallback: Boolean = conf.getConf(CELEBORN_FALLBACK_ENABLED)
 
   def enableHdfsViewfs: Boolean = conf.getConf(HDFS_VIEWFS_ENABLED)
+
+  def enableBroadcastBuildRelationInOffheap: Boolean =
+    conf.getConf(VELOX_BROADCAST_BUILD_RELATION_USE_OFFHEAP)
 }
 
 object GlutenConfig {
@@ -534,9 +544,9 @@ object GlutenConfig {
 
   // Hardware acceleraters backend
   val GLUTEN_SHUFFLE_CODEC_BACKEND = "spark.gluten.sql.columnar.shuffle.codecBackend"
+
   // ABFS config
-  val ABFS_ACCOUNT_KEY = "hadoop.fs.azure.account.key"
-  val SPARK_ABFS_ACCOUNT_KEY: String = "spark." + ABFS_ACCOUNT_KEY
+  val ABFS_PREFIX = "fs.azure."
 
   // GCS config
   val GCS_PREFIX = "fs.gs."
@@ -670,7 +680,7 @@ object GlutenConfig {
 
   var ins: GlutenConfig = _
 
-  def getConf: GlutenConfig = {
+  def get: GlutenConfig = {
     new GlutenConfig(SQLConf.get)
   }
 
@@ -844,7 +854,7 @@ object GlutenConfig {
 
     // handle ABFS config
     conf
-      .filter(_._1.startsWith(SPARK_ABFS_ACCOUNT_KEY))
+      .filter(_._1.startsWith(HADOOP_PREFIX + ABFS_PREFIX))
       .foreach(entry => nativeConfMap.put(entry._1, entry._2))
 
     // put in all GCS configs
@@ -2151,7 +2161,7 @@ object GlutenConfig {
       .createWithDefault("200s")
 
   val VELOX_ORC_SCAN_ENABLED =
-    buildStaticConf("spark.gluten.sql.columnar.backend.velox.orc.scan.enabled")
+    buildConf("spark.gluten.sql.columnar.backend.velox.orc.scan.enabled")
       .internal()
       .doc("Enable velox orc scan. If disabled, vanilla spark orc scan will be used.")
       .booleanConf
@@ -2248,6 +2258,14 @@ object GlutenConfig {
     buildStaticConf("spark.gluten.storage.hdfsViewfs.enabled")
       .internal()
       .doc("If enabled, gluten will convert the viewfs path to hdfs path in scala side")
+      .booleanConf
+      .createWithDefault(false)
+
+  val VELOX_BROADCAST_BUILD_RELATION_USE_OFFHEAP =
+    buildConf("spark.gluten.velox.offHeapBroadcastBuildRelation.enabled")
+      .internal()
+      .doc("Experimental: If enabled, broadcast build relation will use offheap memory. " +
+        "Otherwise, broadcast build relation will use onheap memory.")
       .booleanConf
       .createWithDefault(false)
 }
