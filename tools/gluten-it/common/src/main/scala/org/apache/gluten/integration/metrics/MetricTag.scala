@@ -14,32 +14,26 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.internal
 
-import org.apache.gluten.config._
+package org.apache.gluten.integration.metrics
 
-object GlutenConfigUtil {
-  private def getConfString(configProvider: ConfigProvider, key: String, value: String): String = {
-    Option(ConfigEntry.findEntry(key))
-      .map {
-        _.readFrom(configProvider) match {
-          case o: Option[_] => o.map(_.toString).getOrElse(value)
-          case null => value
-          case v => v.toString
-        }
-      }
-      .getOrElse(value)
+import scala.reflect.{ClassTag, classTag}
+
+trait MetricTag[T] {
+  import MetricTag._
+  final def name(): String = nameOf(ClassTag(this.getClass))
+  def value(): T
+}
+
+object MetricTag {
+  def nameOf[T <: MetricTag[_]: ClassTag]: String = {
+    val clazz = classTag[T].runtimeClass
+    assert(classOf[MetricTag[_]].isAssignableFrom(clazz))
+    clazz.getSimpleName
   }
-
-  def parseConfig(conf: Map[String, String]): Map[String, String] = {
-    val provider = new MapProvider(conf.filter(_._1.startsWith("spark.gluten.")))
-    conf.map {
-      case (k, v) =>
-        if (k.startsWith("spark.gluten.")) {
-          (k, getConfString(provider, k, v))
-        } else {
-          (k, v)
-        }
-    }.toMap
+  case class IsSelfTime() extends MetricTag[Nothing] {
+    override def value(): Nothing = {
+      throw new UnsupportedOperationException()
+    }
   }
 }

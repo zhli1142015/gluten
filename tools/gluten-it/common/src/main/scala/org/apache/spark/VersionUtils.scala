@@ -14,32 +14,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.internal
+package org.apache.spark
 
-import org.apache.gluten.config._
-
-object GlutenConfigUtil {
-  private def getConfString(configProvider: ConfigProvider, key: String, value: String): String = {
-    Option(ConfigEntry.findEntry(key))
-      .map {
-        _.readFrom(configProvider) match {
-          case o: Option[_] => o.map(_.toString).getOrElse(value)
-          case null => value
-          case v => v.toString
-        }
-      }
-      .getOrElse(value)
+object VersionUtils {
+  def majorMinorVersion(): (Int, Int) = {
+    org.apache.spark.util.VersionUtils.majorMinorVersion(org.apache.spark.SPARK_VERSION)
   }
 
-  def parseConfig(conf: Map[String, String]): Map[String, String] = {
-    val provider = new MapProvider(conf.filter(_._1.startsWith("spark.gluten.")))
-    conf.map {
-      case (k, v) =>
-        if (k.startsWith("spark.gluten.")) {
-          (k, getConfString(provider, k, v))
-        } else {
-          (k, v)
-        }
-    }.toMap
+  // Returns X. X < 0 if one < other, x == 0 if one == other, x > 0 if one > other.
+  def compareMajorMinorVersion(one: (Int, Int), other: (Int, Int)): Int = {
+    val base = 1000
+    assert(one._2 < base && other._2 < base)
+    one._1 * base + one._2 - (other._1 * base + other._2)
   }
 }
